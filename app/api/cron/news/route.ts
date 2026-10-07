@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { askAI } from "@/lib/ai";
 import { authorized, madagascarDateKey, madagascarNow } from "@/lib/cron";
 import { postToPage } from "@/lib/meta";
+import { parseRss } from "@/lib/news";
 import { claimOnce, hasRedis, redis } from "@/lib/redis";
 
 export const maxDuration = 60;
@@ -10,25 +11,6 @@ const QUERY = process.env.NEWS_QUERY ?? "Madagascar";
 const MAX_PER_DAY = Number(process.env.NEWS_MAX_PER_DAY ?? 6); // limite quotidienne (reste prudente pour Facebook)
 const MIN_GAP_MIN = Number(process.env.NEWS_MIN_GAP_MIN ?? 90); // écart minimal entre deux publications
 const USE_AI = process.env.NEWS_USE_AI !== "0";
-
-type Item = { title: string; link: string; pubDate: string; source: string };
-
-const decode = (s: string) =>
-  s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-
-function tag(block: string, name: string): string {
-  const m = block.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`));
-  return m ? decode(m[1].replace(/^<!\[CDATA\[|\]\]>$/g, "")).trim() : "";
-}
-
-function parseRss(xml: string): Item[] {
-  return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => ({
-    title: tag(m[1], "title"),
-    link: tag(m[1], "link"),
-    pubDate: tag(m[1], "pubDate"),
-    source: tag(m[1], "source"),
-  }));
-}
 
 export async function GET(req: Request) {
   if (!authorized(req)) return new Response("Unauthorized", { status: 401 });

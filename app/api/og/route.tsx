@@ -2,107 +2,114 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
 import { BUSINESS_NAME, CONTACT } from "@/lib/business";
-import { validOg } from "@/lib/og";
+import { readOg, type OgTheme } from "@/lib/og";
+import { Icon } from "./icons";
 
 export const runtime = "nodejs";
 
-const CYAN = "#00e5ff";
+// Thème classique : papier crème, titres en serif, une couleur forte par type de publication + de l'or.
+const PAPER = "#fbf6ea";
+const INK = "#1b2233";
+const GOLD = "#d4a037";
+const BANDS: Record<OgTheme, string> = {
+  ad: "#14213d", // bleu nuit : annonces du matin
+  news: "#8c1d2b", // rouge bordeaux : à la une
+  tech: "#0b5d57", // vert profond : informatique et science
+  fact: "#5b2a6e", // prune : « Le saviez-vous ? »
+};
 
 export async function GET(req: Request) {
-  const p = new URL(req.url).searchParams;
-  const tag = (p.get("tag") ?? "").slice(0, 32);
-  const title = (p.get("title") ?? "").slice(0, 90);
-  if (!title || !validOg(tag, title, p.get("sig"))) return new Response("Forbidden", { status: 403 });
+  const card = readOg(new URL(req.url).searchParams);
+  if (!card) return new Response("Forbidden", { status: 403 });
 
-  const [bold, regular] = await Promise.all([
-    readFile(path.join(process.cwd(), "assets", "Inter-Bold.woff")),
-    readFile(path.join(process.cwd(), "assets", "Inter-Regular.woff")),
+  const assets = (f: string) => path.join(process.cwd(), "assets", f);
+  const [bold, regular, serif] = await Promise.all([
+    readFile(assets("Inter-Bold.woff")),
+    readFile(assets("Inter-Regular.woff")),
+    readFile(assets("PTSerif-Bold.ttf")),
   ]);
 
   // Logo optionnel : place ton fichier dans assets/logo.png (s'il est absent, la carte s'affiche sans logo).
-  const logoFile = await readFile(path.join(process.cwd(), "assets", "logo.png")).catch(() => null);
+  const logoFile = await readFile(assets("logo.png")).catch(() => null);
   const logoSrc = logoFile ? `data:image/png;base64,${logoFile.toString("base64")}` : null;
 
-  const fontSize = title.length > 60 ? 68 : title.length > 40 ? 80 : 94;
+  const band = BANDS[card.theme];
+  const n = card.title.length;
+  // La taille du texte s'adapte à sa longueur pour que rien ne déborde sur le pied de carte.
+  const titleSize = n <= 28 ? 96 : n <= 50 ? 84 : n <= 75 ? 72 : n <= 95 ? 62 : 54;
+  const longTitle = n > 75;
+  const bodyLen = card.body.length;
+  const bodySize = card.points.length
+    ? 38 // avec la liste de points
+    : bodyLen <= 150
+      ? longTitle ? 42 : 50
+      : bodyLen <= 200
+        ? longTitle ? 36 : 42
+        : 36;
 
   return new ImageResponse(
     (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
-          padding: 84,
-          position: "relative",
-          color: "#ffffff",
-          fontFamily: "Inter",
-          background: "linear-gradient(135deg, #04080d 0%, #0a1824 60%, #06303a 100%)",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            top: -220,
-            right: -220,
-            width: 760,
-            height: 760,
-            borderRadius: 380,
-            display: "flex",
-            background: "radial-gradient(circle, rgba(0,229,255,0.35) 0%, rgba(0,229,255,0) 70%)",
-          }}
-        />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          {tag ? (
-            <div
-              style={{
-                display: "flex",
-                border: `2px solid ${CYAN}`,
-                color: CYAN,
-                borderRadius: 999,
-                padding: "10px 28px",
-                fontSize: 30,
-                fontWeight: 700,
-                letterSpacing: 2,
-                textTransform: "uppercase",
-              }}
-            >
-              {tag}
-            </div>
-          ) : (
-            <div style={{ display: "flex" }} />
-          )}
+      <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", background: PAPER, color: INK, fontFamily: "Inter" }}>
+        {/* Bandeau du haut */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 170, padding: "0 70px", background: band }}>
+          <div style={{ display: "flex", color: GOLD, fontSize: 34, fontWeight: 700, letterSpacing: 5, textTransform: "uppercase" }}>
+            {card.tag}
+          </div>
           {logoSrc ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={logoSrc} height={110} style={{ height: 110, maxWidth: 360 }} alt="" />
+            <img src={logoSrc} height={96} style={{ height: 96, maxWidth: 300 }} alt="" />
+          ) : null}
+        </div>
+        <div style={{ display: "flex", height: 12, background: GOLD }} />
+
+        {/* Contenu */}
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, padding: "58px 70px 0", overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 44 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 150, height: 150, borderRadius: 75, background: band }}>
+              <Icon name={card.icon} size={88} color={GOLD} />
+            </div>
+            <div style={{ display: "flex", flex: 1, height: 5, marginLeft: 30, background: GOLD, opacity: 0.55 }} />
+          </div>
+
+          <div style={{ display: "flex", fontFamily: "PT Serif", fontWeight: 700, fontSize: titleSize, lineHeight: 1.12, color: band }}>
+            {card.title}
+          </div>
+
+          {card.body ? (
+            <div style={{ display: "flex", marginTop: 42, fontSize: bodySize, lineHeight: 1.42, color: "#2a3042" }}>{card.body}</div>
+          ) : null}
+
+          {card.points.length ? (
+            <div style={{ display: "flex", flexDirection: "column", marginTop: 38 }}>
+              {card.points.map((p, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", marginTop: i ? 22 : 0 }}>
+                  <div style={{ display: "flex", width: 20, height: 20, marginRight: 24, background: GOLD, transform: "rotate(45deg)" }} />
+                  <div style={{ display: "flex", flex: 1, fontSize: 36, fontWeight: 700, color: INK }}>{p}</div>
+                </div>
+              ))}
+            </div>
           ) : null}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", width: 120, height: 8, background: CYAN, marginBottom: 44 }} />
-          <div style={{ display: "flex", fontSize, fontWeight: 700, lineHeight: 1.12 }}>{title}</div>
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            borderTop: "2px solid rgba(255,255,255,0.18)",
-            paddingTop: 36,
-          }}
-        >
-          <div style={{ display: "flex", fontSize: 38, fontWeight: 700 }}>{BUSINESS_NAME}</div>
-          <div style={{ display: "flex", fontSize: 30, fontWeight: 400, color: "#8fe9f5", marginTop: 10 }}>{CONTACT}</div>
+        {/* Pied de carte */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 190, padding: "0 70px", background: band }}>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", fontFamily: "PT Serif", fontWeight: 700, fontSize: 46, color: "#ffffff" }}>{BUSINESS_NAME}</div>
+            <div style={{ display: "flex", marginTop: 10, fontSize: 30, color: GOLD }}>{CONTACT}</div>
+          </div>
+          {card.src ? (
+            <div style={{ display: "flex", maxWidth: 400, textAlign: "right", justifyContent: "flex-end", fontSize: 26, color: "#ffffff", opacity: 0.85 }}>{card.src}</div>
+          ) : null}
         </div>
       </div>
     ),
     {
       width: 1080,
-      height: 1080,
+      height: 1350,
       fonts: [
         { name: "Inter", data: bold, weight: 700, style: "normal" },
         { name: "Inter", data: regular, weight: 400, style: "normal" },
+        { name: "PT Serif", data: serif, weight: 700, style: "normal" },
       ],
     },
   );
