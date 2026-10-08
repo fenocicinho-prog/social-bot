@@ -20,23 +20,23 @@ Heures de Madagascar (UTC+3). Vercel lit les heures en UTC, donc `vercel.json` c
 
 | Heure | Route | Contenu |
 |---|---|---|
-| 07:00 | `/api/cron/daily-ad` | Annonce de tes activités : titre, description et 3 points sur l'image, légende détaillée. Un angle différent chaque jour de la semaine. |
-| 12:00 | `/api/cron/noon` | L'actualité la plus importante du moment (`NEWS_QUERY`, par défaut « Madagascar »), avec une image illustrée selon le sujet et une description. |
-| 16:00 | `/api/cron/afternoon` | Un jour sur deux une actualité informatique/science (`TECH_QUERY`), l'autre jour « Le saviez-vous ? » (liste dans `lib/facts.ts`). Si l'actualité est introuvable, le « saviez-vous » la remplace : il y a toujours une publication. |
+| 07:00 | `/api/cron/daily-ad` | Annonce statique, factuelle et rotative, composée à partir de `content/announcements.ts` et des services vérifiés. Les contenus longs deviennent un album d'images. |
+| 12:00 | `/api/cron/noon` | L'actualité la plus importante du moment (`NEWS_QUERY`, par défaut « Madagascar »), avec le titre complet et le résumé fourni par le flux RSS s'il existe. |
+| 16:00 | `/api/cron/afternoon` | Un jour sur deux une actualité informatique/science (`TECH_QUERY`), l'autre jour « Le saviez-vous ? » (liste dans `lib/facts.ts`). Si l'actualité est introuvable, le « saviez-vous » la remplace. |
 
 - **Plan Hobby** : chaque tâche part une fois par jour, mais Vercel peut la lancer n'importe quand dans l'heure prévue (ex. 7 h → entre 7 h et 7 h 59). Pour des heures exactes : plan Pro, ou **cron-job.org** (gratuit) qui appelle la route avec l'en-tête `Authorization: Bearer <CRON_SECRET>` (dans ce cas, retire la ligne correspondante de `vercel.json`).
 - **Pas de doublon** : si une tâche est déclenchée deux fois le même jour, la seconde est ignorée. Si Facebook refuse la publication, la tâche pourra être relancée.
 - **Redis requis** pour les actualités de midi et de 16 h (anti-doublons). Sans Redis, le 16 h publie seulement « Le saviez-vous ? ».
-- **Essai à la main** : `curl -H "Authorization: Bearer $CRON_SECRET" https://TON-DOMAINE/api/cron/noon` (publie pour de vrai sur la Page).
+- **Essai sans publication** : ajoute `?dry=1` aux routes cron et envoie `Authorization: Bearer $CRON_SECRET`. Le JSON donne le contenu et les images rendues ; aucun post n'est envoyé à Facebook.
 - **Actualités en texte seul** : `GET /api/cron/news`, toutes les 3 h depuis **cron-job.org** (ou `vercel.json` sur le plan Pro).
   Garde-fous : pas de publication de 22h à 6h, écart minimal (`NEWS_MIN_GAP_MIN`), quota journalier
   (`NEWS_MAX_PER_DAY`, les publications de midi et de 16 h comptent dedans), jamais deux fois la même actualité.
   Avec les 3 publications programmées, baisse `NEWS_MAX_PER_DAY` (ex. 3) si tu veux un fil moins chargé.
-- Le texte des descriptions est écrit par l'IA à partir du **titre seul** (aucun fait ajouté). Les « Le saviez-vous ? » sont écrits à la main.
+- Les annonces sont écrites à la main dans `content/announcements.ts`. Les publications d'actualités utilisent uniquement le titre et le résumé éventuellement fourni par le flux RSS ; les « Le saviez-vous ? » sont écrits à la main.
 
 ## Carte image (1080 × 1350)
 - Thème classique : papier crème, titres en serif (PT Serif), or en accent, une couleur par type : bleu nuit (annonces), bordeaux (à la une), vert (tech & science), prune (saviez-vous).
-- Chaque carte a un pictogramme choisi selon le sujet (`lib/news.ts` → `guessIcon`, icônes dans `app/api/og/icons.tsx`). La taille du texte s'adapte à sa longueur.
+- Chaque carte a un pictogramme choisi selon le sujet (`lib/news.ts` → `guessIcon`, icônes dans `app/api/og/icons.tsx`). Le texte n'est jamais tronqué ; les annonces longues sont découpées aux frontières de phrases, paragraphes ou puces, puis publiées comme un seul album (maximum 10 images).
 - Aperçu local : `npm run dev`, puis ouvre
   `http://localhost:3000/api/og?tag=À la une&title=Mon titre&body=Ma description&icon=leaf&theme=news`
   (paramètres : `tag`, `title`, `body`, `points` séparés par `|`, `icon`, `theme` = `ad|news|tech|fact`, `src`).

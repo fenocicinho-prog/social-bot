@@ -49,7 +49,52 @@ export function postToPage(message: string, link?: string) {
   return graphPost(`${need("PAGE_ID")}/feed`, need("PAGE_ACCESS_TOKEN"), link ? { message, link } : { message });
 }
 
-/** Publie une image (adresse publique) avec une légende. */
-export function postPhotoToPage(imageUrl: string, caption: string) {
-  return graphPost(`${need("PAGE_ID")}/photos`, need("PAGE_ACCESS_TOKEN"), { url: imageUrl, caption });
+async function uploadPagePhoto(
+  image: Uint8Array,
+  token: string,
+  options: { published: boolean; caption?: string },
+): Promise<string> {
+  const form = new FormData();
+  const bytes = image.slice();
+  form.set("source", new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }), "announcement.png");
+  form.set("published", String(options.published));
+  if (options.caption) form.set("caption", options.caption);
+  const res = await fetch(`${GRAPH}/${need("PAGE_ID")}/photos`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const data = await res.json().catch(() => ({})) as { id?: string; error?: unknown };
+  if (!res.ok || !data.id) throw new Error(`Graph photo ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
+  return data.id;
+}
+
+/** Publie une image PNG envoyée en binaire, sans URL signée ni limite de query string. */
+export async function postPngToPage(image: Uint8Array, caption: string) {
+  const token = need("PAGE_ACCESS_TOKEN");
+  return uploadPagePhoto(image, token, { published: true, caption });
+}
+
+/** Publie plusieurs PNG comme album unique : d'abord privés, puis attachés au même post. */
+export async function postPngAlbumToPage(images: Uint8Array[], caption: string) {
+  if (images.length < 2) throw new Error("Un album exige au moins deux images");
+  const token = need("PAGE_ACCESS_TOKEN");
+  const photoIds: string[] = [];
+  for (const image of images) photoIds.push(await uploadPagePhoto(image, token, { published: false }));
+
+  const form = new URLSearchParams({ message: caption });
+  photoIds.forEach((photoId, index) => {
+    form.set(`attached_media[${index}]`, JSON.stringify({ media_fbid: photoId }));
+  });
+  const res = await fetch(`${GRAPH}/${need("PAGE_ID")}/feed`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+    },
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`Graph album ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
+  return data;
 }

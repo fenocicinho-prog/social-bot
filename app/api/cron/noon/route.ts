@@ -1,55 +1,81 @@
 import { SERVICE_URL } from "@/lib/business";
 import { authorized, madagascarDateKey } from "@/lib/cron";
-import { postPhotoToPage } from "@/lib/meta";
-import { claimFirstUnseen, describe, fetchNews, guessIcon, markPosted } from "@/lib/news";
-import { ogUrl } from "@/lib/og";
+import { postPngToPage } from "@/lib/meta";
+import { claimFirstUnseen, fetchNews, findFirstUnseen, guessIcon, markPosted, publisherSummary } from "@/lib/news";
+import { buildNewsPages } from "@/lib/news-cards";
+import { renderOgPng } from "@/lib/og-render";
+import { postPngAlbumToPage } from "@/lib/meta";
 import { claimOnce, hasRedis, redis } from "@/lib/redis";
 
 export const maxDuration = 60;
-
-// 12 h (Madagascar) : l'actualité la plus importante du moment, avec une image et une description.
 const QUERY = process.env.NEWS_QUERY ?? "Madagascar";
 
 export async function GET(req: Request) {
   if (!authorized(req)) return new Response("Unauthorized", { status: 401 });
-  if (!hasRedis) return Response.json({ error: "Redis requis (anti-doublons)" }, { status: 500 });
+  const dry = new URL(req.url).searchParams.get("dry") === "1";
+  if (!dry && !hasRedis) return Response.json({ error: "Redis requis (anti-doublons)" }, { status: 500 });
 
   const slotKey = `post:noon:${madagascarDateKey()}`;
-  if (!(await claimOnce(slotKey, 86400))) return Response.json({ skipped: "déjà publié aujourd'hui" });
+  if (!dry && !(await claimOnce(slotKey, 86400))) return Response.json({ skipped: "déjà publié aujourd'hui" });
 
   let seenKey: string | undefined;
   try {
-    const pick = await claimFirstUnseen(await fetchNews(QUERY));
+    const items = await fetchNews(QUERY);
+    const pick = dry ? await findFirstUnseen(items) : await claimFirstUnseen(items);
     if (!pick) {
-      await redis("DEL", slotKey); // on pourra réessayer plus tard dans la journée
-      return Response.json({ skipped: "aucune nouvelle info" });
+      if (!dry) await redis("DEL", slotKey);
+      return Response.json({ skipped: "aucune nouvelle info", dry, published: false });
     }
     seenKey = pick.seenKey;
     const { item, headline } = pick;
+    const summary = publisherSummary(item, headline);
+    const captionParts = [headline, summary && summary !== headline ? summary : ""];
+    if (item.source) captionParts.push(`Source : ${item.source}`);
+    captionParts.push(item.link);
+    if (SERVICE_URL) captionParts.push(SERVICE_URL);
+    const caption = captionParts.filter(Boolean).join("\n\n");
+    const pages = buildNewsPages({
+      tag: "À la une",
+      title: headline,
+      summary: summary && summary !== headline ? summary : "",
+      source: item.source,
+      icon: guessIcon(headline, "news" as const),
+      theme: "news" as const,
+    });
+    const images: Uint8Array[] = [];
+    for (const page of pages) images.push(await renderOgPng(page));
 
-    const description = await describe(headline);
-    const caption =
-      `📰 ${description || headline}` +
-      (item.source ? `\n\nSource : ${item.source}` : "") +
-      `\n🔗 ${item.link}` +
-      (SERVICE_URL ? `\n\n👉 ${SERVICE_URL}` : "");
-
-    await postPhotoToPage(
-      ogUrl({
-        tag: "À la une",
+    if (dry) {
+      return Response.json({
+        dry: true,
+        published: false,
         title: headline,
-        body: description,
-        icon: guessIcon(headline, "news"),
-        theme: "news",
-        src: item.source ? `Source : ${item.source}` : "",
-      }),
-      caption,
-    );
+        summary,
+        source: item.source,
+        link: item.link,
+        caption,
+        imageCount: images.length,
+        images: images.map((image, index) => ({
+          page: index + 1,
+          totalPages: images.length,
+          contentType: "image/png",
+          width: 1080,
+          height: 1350,
+          bytes: image.byteLength,
+          text: pages[index].plainText,
+        })),
+      });
+    }
+
+    if (images.length === 1) await postPngToPage(images[0], caption);
+    else await postPngAlbumToPage(images, caption);
     await markPosted();
-    return Response.json({ posted: headline });
+    return Response.json({ posted: headline, imageCount: images.length });
   } catch (err) {
-    await redis("DEL", slotKey).catch(() => undefined);
-    if (seenKey) await redis("DEL", seenKey).catch(() => undefined); // l'actualité pourra être reprise
+    if (!dry) {
+      await redis("DEL", slotKey).catch(() => undefined);
+      if (seenKey) await redis("DEL", seenKey).catch(() => undefined);
+    }
     console.error("noon a échoué", err);
     return Response.json({ error: String(err) }, { status: 500 });
   }

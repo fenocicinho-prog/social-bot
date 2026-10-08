@@ -1,17 +1,27 @@
 import { createHash } from "node:crypto";
-import { askAI } from "./ai";
 import { madagascarDateKey } from "./cron";
 import type { OgIcon } from "./og";
-import { claimOnce, redis } from "./redis";
+import { claimOnce, hasRedis, redis } from "./redis";
 
-export type NewsItem = { title: string; link: string; pubDate: string; source: string };
+export type NewsItem = { title: string; link: string; pubDate: string; source: string; summary: string };
 
 const decode = (s: string) =>
   s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 
+function cleanSummary(raw: string): string {
+  return decode(
+    decode(raw.replace(/^<!\[CDATA\[|\]\]>$/g, ""))
+      .replace(/<br\s*\/?\s*>/gi, "\n")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+      .replace(/&#x([\da-f]+);/gi, (_, code: string) => String.fromCodePoint(parseInt(code, 16))),
+  ).replace(/\s+/g, " ").replace(/\s+([,.;!?])/g, "$1").trim();
+}
+
 function tag(block: string, name: string): string {
   const m = block.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`));
-  return m ? decode(m[1].replace(/^<!\[CDATA\[|\]\]>$/g, "")).trim() : "";
+  return m ? cleanSummary(m[1]) : "";
 }
 
 export function parseRss(xml: string): NewsItem[] {
@@ -20,10 +30,31 @@ export function parseRss(xml: string): NewsItem[] {
     link: tag(m[1], "link"),
     pubDate: tag(m[1], "pubDate"),
     source: tag(m[1], "source"),
+    summary: cleanSummary(tag(m[1], "description")),
   }));
 }
 
-/** Google Actualités : les résultats sont déjà classés par pertinence (les plus importants en premier). */
+function comparable(value: string): string {
+  return value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+/** Retourne uniquement un vrai résumé éditorial, pas la répétition titre + source de Google RSS. */
+export function publisherSummary(item: Pick<NewsItem, "summary" | "source">, headline: string): string {
+  const summary = item.summary.trim();
+  if (!summary) return "";
+  const cleanHeadline = headlineOf(headline);
+  const candidate = comparable(summary);
+  const title = comparable(cleanHeadline);
+  const source = comparable(item.source);
+  if (candidate === title || (source && candidate === `${title} ${source}`)) return "";
+  if (candidate.startsWith(`${title} `)) {
+    const remainder = candidate.slice(title.length).trim();
+    if (!remainder || (source && remainder === source)) return "";
+  }
+  return summary;
+}
+
+/** Google Actualités : résultats classés par pertinence (les plus importants en premier). */
 export async function fetchNews(query: string): Promise<NewsItem[]> {
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(`${query} when:1d`)}&hl=fr&gl=MG&ceid=MG:fr`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(15_000) });
@@ -31,13 +62,10 @@ export async function fetchNews(query: string): Promise<NewsItem[]> {
   return parseRss(await res.text());
 }
 
-/** Retire " - Nom du média" à la fin du titre. */
+/** Retire « - Nom du média » à la fin du titre. */
 export const headlineOf = (title: string) => title.replace(/\s+-\s+[^-]+$/, "").trim();
 
-/**
- * Prend la première actualité jamais publiée et la réserve (même clé que la route /api/cron/news :
- * une actualité n'est donc jamais publiée deux fois, quelle que soit la route).
- */
+/** Réserve la première actualité encore inédite. */
 export async function claimFirstUnseen(items: NewsItem[]): Promise<{ item: NewsItem; headline: string; seenKey: string } | null> {
   for (const item of items) {
     if (!item.title || !item.link) continue;
@@ -49,30 +77,19 @@ export async function claimFirstUnseen(items: NewsItem[]): Promise<{ item: NewsI
   return null;
 }
 
-/** Courte description à partir du titre seul. Renvoie "" si l'IA est indisponible (on publie alors le titre seul). */
-export async function describe(headline: string): Promise<string> {
-  if (process.env.NEWS_USE_AI === "0") return "";
-  try {
-    const text = await askAI(
-      [
-        {
-          role: "system",
-          content:
-            "Tu rédiges une courte description (1 à 2 phrases, 200 caractères maximum, français) à partir d'un titre d'actualité, " +
-            "pour accompagner une image. N'ajoute AUCUN fait, chiffre, nom, lieu ou détail absent du titre. " +
-            "Ton neutre et factuel, sans emoji. Réponds uniquement avec le texte, sans guillemets.",
-        },
-        { role: "user", content: headline },
-      ],
-      { maxTokens: 150, temperature: 0.3 },
-    );
-    return text.replace(/^["«\s]+|["»\s]+$/g, "").slice(0, 260);
-  } catch {
-    return "";
+/** Choisit sans réserver la clé Redis, réservé aux essais sans publication. */
+export async function findFirstUnseen(items: NewsItem[]): Promise<{ item: NewsItem; headline: string; seenKey: string } | null> {
+  for (const item of items) {
+    if (!item.title || !item.link) continue;
+    const headline = headlineOf(item.title);
+    const id = createHash("sha1").update(headline.toLowerCase()).digest("hex").slice(0, 16);
+    const seenKey = `news:seen:${id}`;
+    if (!hasRedis || !(await redis("EXISTS", seenKey))) return { item, headline, seenKey };
   }
+  return null;
 }
 
-/** Compte la publication dans le quota du jour et déclenche l'écart minimal de la route /api/cron/news. */
+/** Compte la publication et met en place l'écart minimal entre deux publications. */
 export async function markPosted(): Promise<void> {
   const gapMin = Number(process.env.NEWS_MIN_GAP_MIN ?? 90);
   await redis("SET", "news:gap", "1", "EX", gapMin * 60).catch(() => undefined);
@@ -80,7 +97,7 @@ export async function markPosted(): Promise<void> {
   if (Number(await redis("INCR", dayKey).catch(() => 0)) === 1) await redis("EXPIRE", dayKey, 172800).catch(() => undefined);
 }
 
-/** Choisit le pictogramme selon le sujet du titre, pour que l'image « ressemble » à l'annonce. */
+/** Choisit le pictogramme selon le sujet du titre. */
 export function guessIcon(text: string, fallback: OgIcon = "news"): OgIcon {
   const t = text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
   const rules: [RegExp, OgIcon][] = [

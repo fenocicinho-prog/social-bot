@@ -11,50 +11,53 @@ export function siteUrl(): string {
 export type OgIcon =
   | "news" | "chip" | "science" | "leaf" | "coins" | "shield" | "phone" | "code" | "bulb" | "book" | "chat";
 export type OgTheme = "ad" | "news" | "tech" | "fact";
+export type OgSegment = { type: "paragraph" | "bullet"; text: string };
 
-/** Tout ce qui s'affiche sur une carte image. Seul "title" est obligatoire. */
+/** Tout le texte fourni est gardé intégralement ; les annonces longues sont paginées avant rendu. */
 export type OgCard = {
-  tag?: string; // petit libellé en haut (ex. "À la une")
-  title: string; // grande phrase
-  body?: string; // texte de description sous le titre
-  points?: string[]; // jusqu'à 3 lignes courtes avec puce
+  tag?: string;
+  title: string;
+  body?: string;
+  points?: string[];
+  segments?: OgSegment[];
   icon?: OgIcon;
   theme?: OgTheme;
-  src?: string; // ex. "Source : Midi Madagasikara"
+  src?: string;
 };
 
-export const LIMITS = { tag: 32, title: 110, body: 220, point: 56, src: 60 } as const;
+export type NormalizedOgCard = Required<Omit<OgCard, "points" | "segments">> & {
+  points: string[];
+  segments: OgSegment[];
+};
 
-/** Nettoie et tronque les champs : c'est ce texte-là qui est signé et dessiné. */
-export function normalize(c: OgCard): Required<Omit<OgCard, "points">> & { points: string[] } {
-  const cut = (s: string | undefined, n: number) => {
-    const t = (s ?? "").replace(/\s+/g, " ").trim();
-    return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t;
-  };
+/** Nettoie seulement les espaces extérieurs : aucun champ ni point n'est tronqué. */
+export function normalize(c: OgCard): NormalizedOgCard {
   return {
-    tag: cut(c.tag, LIMITS.tag),
-    title: cut(c.title, LIMITS.title),
-    body: cut(c.body, LIMITS.body),
-    points: (c.points ?? []).map((p) => cut(p, LIMITS.point)).filter(Boolean).slice(0, 3),
+    tag: (c.tag ?? "").trim(),
+    title: (c.title ?? "").trim(),
+    body: (c.body ?? "").trim(),
+    points: (c.points ?? []).map((point) => point.trim()).filter(Boolean),
+    segments: (c.segments ?? []).map((segment) => ({ type: segment.type, text: segment.text.trim() })).filter((segment) => segment.text),
     icon: c.icon ?? "news",
     theme: c.theme ?? "ad",
-    src: cut(c.src, LIMITS.src),
+    src: (c.src ?? "").trim(),
   };
 }
 
-// Les adresses d'image sont signées : personne d'autre ne peut faire fabriquer d'images par ton serveur.
-const sign = (c: ReturnType<typeof normalize>) =>
+const sign = (c: NormalizedOgCard) =>
   createHmac("sha256", process.env.CRON_SECRET ?? "")
-    .update(JSON.stringify([c.tag, c.title, c.body, c.points, c.icon, c.theme, c.src]))
+    .update(JSON.stringify([c.tag, c.title, c.body, c.points, c.segments, c.icon, c.theme, c.src]))
     .digest("hex")
     .slice(0, 32);
 
+/** URL surtout destinée à l'aperçu ; les routes cron rendent leurs images directement en mémoire. */
 export function ogUrl(card: OgCard): string {
   const c = normalize(card);
   const q = new URLSearchParams({ title: c.title, icon: c.icon, theme: c.theme, sig: sign(c) });
   if (c.tag) q.set("tag", c.tag);
   if (c.body) q.set("body", c.body);
-  if (c.points.length) q.set("points", c.points.join("|"));
+  if (c.points.length) q.set("points", JSON.stringify(c.points));
+  if (c.segments.length) q.set("segments", JSON.stringify(c.segments));
   if (c.src) q.set("src", c.src);
   return `${siteUrl()}/api/og?${q.toString()}`;
 }
@@ -62,24 +65,37 @@ export function ogUrl(card: OgCard): string {
 const ICONS: OgIcon[] = ["news", "chip", "science", "leaf", "coins", "shield", "phone", "code", "bulb", "book", "chat"];
 const THEMES: OgTheme[] = ["ad", "news", "tech", "fact"];
 
+function parseArray<T>(raw: string | null): T[] {
+  if (!raw) return [];
+  try {
+    const value: unknown = JSON.parse(raw);
+    return Array.isArray(value) ? value as T[] : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Relit une carte depuis l'adresse ; renvoie null si la signature est fausse (en production). */
-export function readOg(p: URLSearchParams): ReturnType<typeof normalize> | null {
-  const icon = ICONS.find((i) => i === p.get("icon"));
-  const theme = THEMES.find((t) => t === p.get("theme"));
+export function readOg(params: URLSearchParams): NormalizedOgCard | null {
+  const icon = ICONS.find((value) => value === params.get("icon"));
+  const theme = THEMES.find((value) => value === params.get("theme"));
+  const rawPoints = params.get("points");
+  const points = rawPoints?.startsWith("[") ? parseArray<string>(rawPoints) : (rawPoints ?? "").split("|");
   const c = normalize({
-    tag: p.get("tag") ?? "",
-    title: p.get("title") ?? "",
-    body: p.get("body") ?? "",
-    points: (p.get("points") ?? "").split("|"),
+    tag: params.get("tag") ?? "",
+    title: params.get("title") ?? "",
+    body: params.get("body") ?? "",
+    points,
+    segments: parseArray<OgSegment>(params.get("segments")),
     icon,
     theme,
-    src: p.get("src") ?? "",
+    src: params.get("src") ?? "",
   });
   if (!c.title) return null;
-  if (process.env.NODE_ENV !== "production") return c; // aperçu libre en local
-  const sig = p.get("sig");
+  if (process.env.NODE_ENV !== "production") return c;
+  const sig = params.get("sig");
   if (!process.env.CRON_SECRET || !sig) return null;
-  const a = Buffer.from(sign(c));
-  const b = Buffer.from(sig);
-  return a.length === b.length && timingSafeEqual(a, b) ? c : null;
+  const expected = Buffer.from(sign(c));
+  const received = Buffer.from(sig);
+  return expected.length === received.length && timingSafeEqual(expected, received) ? c : null;
 }
