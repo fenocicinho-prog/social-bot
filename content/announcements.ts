@@ -6,6 +6,7 @@ export type StaticAnnouncement = {
   title: string;
   paragraphs: string[];
   points: string[];
+  caption?: string;
 };
 
 // Chaque affirmation reprend uniquement ANGLES et lib/business.ts.
@@ -64,18 +65,6 @@ export const ANNOUNCEMENTS: StaticAnnouncement[] = [
     ],
   },
   {
-    tag: "Chatbot IA",
-    icon: "chat",
-    title: "Assistants IA et chatbots",
-    paragraphs: [
-      "Des assistants IA et chatbots pour Messenger et WhatsApp.",
-    ],
-    points: [
-      "Pour Messenger",
-      "Pour WhatsApp",
-    ],
-  },
-  {
     tag: "Visibilité",
     icon: "shield",
     title: "Être visible et crédible en ligne",
@@ -86,6 +75,20 @@ export const ANNOUNCEMENTS: StaticAnnouncement[] = [
       "Sites de présentation en HTML, CSS et JavaScript",
       "Pages de téléchargement de produit",
     ],
+  },
+  {
+    tag: "Chatbot IA",
+    icon: "chat",
+    title: "Un chatbot pour aider vos clients",
+    paragraphs: [
+      "Un chatbot IA peut répondre aux questions courantes sur Messenger et WhatsApp.",
+    ],
+    points: [
+      "Répond aux questions fréquentes.",
+      "Aide à trouver les bonnes informations.",
+      "Disponible sur Messenger et WhatsApp.",
+    ],
+    caption: "Un chatbot pour aider vos clients\n\nVous recevez souvent les mêmes questions sur Messenger et WhatsApp ? Un chatbot IA peut aider à répondre aux demandes courantes et à orienter vos clients vers les bonnes informations.\n\n• Il répond aux questions fréquentes.\n• Il aide les clients à trouver les informations utiles.\n• Il peut être adapté à votre activité.\n\nÉcrivez-nous pour en parler.",
   },
   {
     tag: "Made in Madagascar",

@@ -57,11 +57,15 @@ function summaryTitle(title: string): string {
 }
 
 function captionFor(announcement: StaticAnnouncement): string {
-  const content = [
+  const content = announcement.caption?.trim() || [
     announcement.title,
     ...announcement.paragraphs,
     ...announcement.points.map((point) => `• ${point}`),
   ].join("\n\n");
+  const internalReasoning = /here(?:'|’)s a thinking process|analyze user input|identify core message|chain[- ]of[- ]thought|let me think|step\s+\d+\s*[:.]/iu;
+  if (internalReasoning.test(content)) {
+    throw new Error("L’annonce contient du raisonnement interne et ne peut pas être publiée.");
+  }
   return `${content}\n\n${CONTACT}\n${SERVICE_URL}`;
 }
 
