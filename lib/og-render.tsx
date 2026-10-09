@@ -37,10 +37,19 @@ export async function renderOgPng(input: OgCard): Promise<Uint8Array> {
         ...card.points.map((text) => ({ type: "bullet" as const, text })),
       ];
   const contentLength = segments.reduce((sum, segment) => sum + [...segment.text].length, 0);
-  const bodySize = Math.max(
-    20,
-    Math.min(40, 40 - Math.max(0, contentLength - 125) * 0.055 - Math.max(0, segments.length - 6) * 1.2),
-  );
+  const bodySize =
+    card.theme === "ad" && !card.showFooter
+      ? Math.max(
+          26,
+          Math.min(
+            32,
+            Math.round(32 - Math.max(0, contentLength - 180) * 0.02 - Math.max(0, segments.length - 6) * 0.8),
+          ),
+        )
+      : Math.max(
+          20,
+          Math.min(40, 40 - Math.max(0, contentLength - 125) * 0.055 - Math.max(0, segments.length - 6) * 1.2),
+        );
 
   const response = new ImageResponse(
     (
@@ -71,7 +80,7 @@ export async function renderOgPng(input: OgCard): Promise<Uint8Array> {
               {segments.map((segment, index) => (
                 <div key={index} style={{ display: "flex", alignItems: "flex-start", gap: segment.type === "bullet" ? 17 : 0, fontSize: bodySize, lineHeight: 1.26, color: INK, wordBreak: "break-word" }}>
                   {segment.type === "bullet" ? (
-                    <div style={{ display: "flex", flexShrink: 0, width: 13, height: 13, marginTop: bodySize * 0.48, background: GOLD, transform: "rotate(45deg)" }} />
+                    <div style={{ display: "flex", flexShrink: 0, width: 12, height: 12, marginTop: bodySize * 0.48, borderRadius: 6, background: GOLD }} />
                   ) : null}
                   <span style={{ display: "flex", flex: 1 }}>{segment.text}</span>
                 </div>
@@ -80,16 +89,18 @@ export async function renderOgPng(input: OgCard): Promise<Uint8Array> {
           ) : null}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 205, padding: "22px 70px", background: band }}>
-          <div style={{ display: "flex", flexDirection: "column", maxWidth: card.src ? 590 : 900 }}>
-            <div style={{ display: "flex", fontFamily: "PT Serif", fontWeight: 700, fontSize: 42, color: "#ffffff" }}>{BUSINESS_NAME}</div>
-            <div style={{ display: "flex", marginTop: 7, fontSize: 24, color: GOLD }}>{CONTACT}</div>
-            <div style={{ display: "flex", marginTop: 6, fontSize: 18, color: "#ffffff" }}>{SERVICE_URL}</div>
+        {card.showFooter ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 205, padding: "22px 70px", background: band }}>
+            <div style={{ display: "flex", flexDirection: "column", maxWidth: card.src ? 590 : 900 }}>
+              <div style={{ display: "flex", fontFamily: "PT Serif", fontWeight: 700, fontSize: 42, color: "#ffffff" }}>{BUSINESS_NAME}</div>
+              <div style={{ display: "flex", marginTop: 7, fontSize: 24, color: GOLD }}>{CONTACT}</div>
+              <div style={{ display: "flex", marginTop: 6, fontSize: 18, color: "#ffffff" }}>{SERVICE_URL}</div>
+            </div>
+            {card.src ? (
+              <div style={{ display: "flex", maxWidth: 310, textAlign: "right", justifyContent: "flex-end", fontSize: 21, lineHeight: 1.2, color: "#ffffff", opacity: 0.9, overflowWrap: "anywhere" }}>{card.src}</div>
+            ) : null}
           </div>
-          {card.src ? (
-            <div style={{ display: "flex", maxWidth: 310, textAlign: "right", justifyContent: "flex-end", fontSize: 21, lineHeight: 1.2, color: "#ffffff", opacity: 0.9, overflowWrap: "anywhere" }}>{card.src}</div>
-          ) : null}
-        </div>
+        ) : null}
       </div>
     ),
     {

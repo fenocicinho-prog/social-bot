@@ -4,8 +4,8 @@ import type { StaticAnnouncement } from "@/content/announcements";
 
 export const MAX_ANNOUNCEMENT_IMAGES = 10;
 const MAX_SEGMENT_CHARS = 280;
-const MAX_PAGE_CHARS = 360;
-const MAX_PAGE_SEGMENTS = 8;
+const MAX_PAGE_CHARS = 700;
+const MAX_PAGE_SEGMENTS = 12;
 
 type AnnouncementPage = OgCard & { page: number; totalPages: number; plainText: string };
 
@@ -19,7 +19,13 @@ function sentenceParts(text: string): string[] {
 function splitSegments(announcement: StaticAnnouncement): OgSegment[] {
   const result: OgSegment[] = [];
   const add = (type: OgSegment["type"], text: string) => {
-    const sentences = sentenceParts(text);
+    const clean = text.trim();
+    if (!clean) return;
+    if ([...clean].length <= MAX_SEGMENT_CHARS) {
+      result.push({ type, text: clean });
+      return;
+    }
+    const sentences = sentenceParts(clean);
     let current = "";
     for (const sentence of sentences) {
       if ([...sentence].length > MAX_SEGMENT_CHARS) {
@@ -38,8 +44,12 @@ function splitSegments(announcement: StaticAnnouncement): OgSegment[] {
     if (current) result.push({ type, text: current });
   };
 
-  announcement.paragraphs.forEach((paragraph) => add("paragraph", paragraph));
-  announcement.points.forEach((point) => add("bullet", point));
+  const lines = captionFor(announcement).split(/\n+/u).map((line) => line.trim()).filter(Boolean);
+  const contentLines = lines[0] === announcement.title ? lines.slice(1) : lines;
+  for (const line of contentLines) {
+    const bullet = line.match(/^•\s+(.*)$/u);
+    add(bullet ? "bullet" : "paragraph", bullet ? bullet[1] : line);
+  }
   return result;
 }
 
@@ -110,6 +120,7 @@ export function buildAnnouncementPages(
       body: "",
       points: [],
       segments: pageSegments,
+      showFooter: false,
       icon: announcement.icon,
       theme: "ad",
       page,
@@ -118,16 +129,11 @@ export function buildAnnouncementPages(
     };
   });
 
-  const text = [
-    announcement.title,
-    ...announcement.paragraphs,
-    ...announcement.points.map((point) => `• ${point}`),
-  ].join("\n\n");
-  return { pages, caption: captionFor(announcement), text };
+  const caption = captionFor(announcement);
+  const text = caption;
+  return { pages, caption, text };
 }
 
-export function formatAlbumCaption(announcement: StaticAnnouncement, totalPages: number): string {
-  const caption = captionFor(announcement);
-  if (totalPages <= 1) return caption;
-  return `${caption}\n\nPublication en ${totalPages} images.`;
+export function formatAlbumCaption(announcement: StaticAnnouncement, _totalPages: number): string {
+  return captionFor(announcement);
 }

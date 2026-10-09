@@ -20,14 +20,16 @@ export type OgCard = {
   body?: string;
   points?: string[];
   segments?: OgSegment[];
+  showFooter?: boolean;
   icon?: OgIcon;
   theme?: OgTheme;
   src?: string;
 };
 
-export type NormalizedOgCard = Required<Omit<OgCard, "points" | "segments">> & {
+export type NormalizedOgCard = Required<Omit<OgCard, "points" | "segments" | "showFooter">> & {
   points: string[];
   segments: OgSegment[];
+  showFooter: boolean;
 };
 
 /** Nettoie seulement les espaces extérieurs : aucun champ ni point n'est tronqué. */
@@ -38,6 +40,7 @@ export function normalize(c: OgCard): NormalizedOgCard {
     body: (c.body ?? "").trim(),
     points: (c.points ?? []).map((point) => point.trim()).filter(Boolean),
     segments: (c.segments ?? []).map((segment) => ({ type: segment.type, text: segment.text.trim() })).filter((segment) => segment.text),
+    showFooter: c.showFooter ?? true,
     icon: c.icon ?? "news",
     theme: c.theme ?? "ad",
     src: (c.src ?? "").trim(),
@@ -46,7 +49,7 @@ export function normalize(c: OgCard): NormalizedOgCard {
 
 const sign = (c: NormalizedOgCard) =>
   createHmac("sha256", process.env.CRON_SECRET ?? "")
-    .update(JSON.stringify([c.tag, c.title, c.body, c.points, c.segments, c.icon, c.theme, c.src]))
+    .update(JSON.stringify([c.tag, c.title, c.body, c.points, c.segments, c.icon, c.theme, c.src, c.showFooter]))
     .digest("hex")
     .slice(0, 32);
 
@@ -54,6 +57,7 @@ const sign = (c: NormalizedOgCard) =>
 export function ogUrl(card: OgCard): string {
   const c = normalize(card);
   const q = new URLSearchParams({ title: c.title, icon: c.icon, theme: c.theme, sig: sign(c) });
+  if (!c.showFooter) q.set("footer", "0");
   if (c.tag) q.set("tag", c.tag);
   if (c.body) q.set("body", c.body);
   if (c.points.length) q.set("points", JSON.stringify(c.points));
@@ -87,6 +91,7 @@ export function readOg(params: URLSearchParams): NormalizedOgCard | null {
     body: params.get("body") ?? "",
     points,
     segments: parseArray<OgSegment>(params.get("segments")),
+    showFooter: params.get("footer") !== "0",
     icon,
     theme,
     src: params.get("src") ?? "",
