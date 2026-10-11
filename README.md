@@ -44,3 +44,9 @@ Heures de Madagascar (UTC+3). Vercel lit les heures en UTC, donc `vercel.json` c
 - Polices dans `assets/` (Inter, PT Serif : licence libre OFL, voir `assets/PTSerif-OFL.txt`).
 - **Logo** : place ton fichier à `assets/logo.png` (PNG, fond transparent de préférence, au moins 400 px de haut).
   Il s'affiche en haut à droite de la carte ; s'il est absent, la carte s'affiche sans logo.
+
+## Vitrine portfolio (`/demo`)
+Page publique pour présenter le bot : planning, cartes image, simulateur de chat et garde-fous.
+- `/` redirige vers `/demo`. Données dans `lib/demo-data.ts` (statiques : aucun secret, aucun appel Meta/Redis/IA).
+- `/api/demo/card?i=N` rend uniquement des cartes prédéfinies (pas de texte libre, donc pas d'abus possible).
+- Pour l'intégrer à ton portfolio : lien vers `https://TON-DOMAINE/demo` ou `<iframe src="https://TON-DOMAINE/demo">`.
