@@ -27,3 +27,16 @@ export async function rateLimited(id: string, max = 20, windowSec = 3600): Promi
   if (n === 1) await redis("EXPIRE", `rl:${id}`, windowSec);
   return n > max;
 }
+
+/**
+ * Quota de messages par jour et par utilisateur. Clé datée (remise à zéro chaque jour) ;
+ * sans Redis configuré, on ne bloque jamais (fail-open) plutôt que de casser le bot.
+ */
+export async function dailyQuota(id: string, max: number): Promise<{ blocked: boolean; count: number }> {
+  if (!hasRedis) return { blocked: false, count: 0 };
+  const day = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+  const key = `dq:${day}:${id}`;
+  const n = Number(await redis("INCR", key));
+  if (n === 1) await redis("EXPIRE", key, 90_000); // un peu plus qu'un jour : marge de fuseau horaire
+  return { blocked: n > max, count: n };
+}
