@@ -8,6 +8,22 @@ import "./demo.css";
 export const metadata: Metadata = {
   title: "Cicinho Social Bot · Démo",
   description: "Bot Messenger & WhatsApp qui répond aux clients et publie chaque jour sur Facebook.",
+  alternates: { canonical: "/demo" },
+  openGraph: {
+    type: "website",
+    locale: "fr_FR",
+    siteName: "Cicinho Social Bot",
+    title: "Cicinho Social Bot — Assistant Messenger et WhatsApp",
+    description: "Bot Messenger & WhatsApp qui répond aux clients et publie chaque jour sur Facebook.",
+    url: "/demo",
+    images: [{ url: "/logo.png", width: 1024, height: 1024, alt: "Logo Cicinho Social Bot" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Cicinho Social Bot — Assistant Messenger et WhatsApp",
+    description: "Bot Messenger & WhatsApp qui répond aux clients et publie chaque jour sur Facebook.",
+    images: ["/logo.png"],
+  },
 };
 
 export default function Demo() {
