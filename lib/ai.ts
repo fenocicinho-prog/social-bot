@@ -27,7 +27,7 @@ export async function askAI(
             model,
             messages,
             temperature: opts.temperature ?? 0.3,
-            max_tokens: opts.maxTokens ?? 600,
+            max_tokens: opts.maxTokens ?? 1000,
           }),
           signal: AbortSignal.timeout(40_000),
         });

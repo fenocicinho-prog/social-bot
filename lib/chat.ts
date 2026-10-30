@@ -36,7 +36,7 @@ export async function answer(userKey: string, text: string): Promise<string> {
     const userText = text.slice(0, 2000);
     let reply = await askAI(
       [{ role: "system", content: CUSTOMER_SYSTEM }, ...history, { role: "user", content: userText }],
-      { maxTokens: 600 },
+      { maxTokens: 1000 },
     );
     const remaining = DAILY_MESSAGE_LIMIT - quota.count;
     if (remaining > 0 && remaining <= QUOTA_WARNING_THRESHOLD) {

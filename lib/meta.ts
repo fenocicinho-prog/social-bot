@@ -17,6 +17,50 @@ export function validSignature(rawBody: string, header: string | null): boolean 
   return expected.length === received.length && timingSafeEqual(expected, received);
 }
 
+/** Découpe sans tronquer, en privilégiant paragraphes, phrases puis espaces. */
+export function splitTextIntoChunks(text: string, maxChars: number): string[] {
+  if (!Number.isInteger(maxChars) || maxChars < 1) throw new Error("maxChars doit être un entier positif");
+  if (!text) return [];
+
+  const chunks: string[] = [];
+  let rest = text;
+  while (rest.length > maxChars) {
+    const window = rest.slice(0, maxChars + 1);
+    const minPreferredEnd = Math.floor(maxChars / 2);
+    let end = -1;
+
+    const paragraphEnd = window.lastIndexOf("\n\n");
+    if (paragraphEnd >= minPreferredEnd) end = paragraphEnd + 2;
+
+    if (end < 0) {
+      const sentenceBoundary = /[.!?…]["'”’»)]*\s+/g;
+      for (const match of window.matchAll(sentenceBoundary)) {
+        const candidate = (match.index ?? 0) + match[0].length;
+        if (candidate <= maxChars && candidate >= minPreferredEnd) end = candidate;
+      }
+    }
+
+    if (end < 0) {
+      const newlineEnd = window.lastIndexOf("\n", maxChars - 1);
+      if (newlineEnd >= minPreferredEnd) end = newlineEnd + 1;
+    }
+    if (end < 0) {
+      const whitespace = /\s/g;
+      for (const match of window.matchAll(whitespace)) {
+        const candidate = (match.index ?? 0) + 1;
+        if (candidate <= maxChars && candidate >= minPreferredEnd) end = candidate;
+      }
+    }
+    // Un seul mot/URL dépasse la limite : seule cette situation impose une coupure stricte.
+    if (end < 1 || end > maxChars) end = maxChars;
+
+    chunks.push(rest.slice(0, end));
+    rest = rest.slice(end);
+  }
+  if (rest) chunks.push(rest);
+  return chunks;
+}
+
 async function graphPost(path: string, token: string, body: Record<string, unknown>) {
   const res = await fetch(`${GRAPH}/${path}`, {
     method: "POST",
@@ -28,21 +72,30 @@ async function graphPost(path: string, token: string, body: Record<string, unkno
   return data;
 }
 
-export function sendMessenger(psid: string, text: string) {
-  return graphPost("me/messages", need("PAGE_ACCESS_TOKEN"), {
-    recipient: { id: psid },
-    messaging_type: "RESPONSE",
-    message: { text: text.slice(0, 1900) },
-  });
+export async function sendMessenger(psid: string, text: string) {
+  const token = need("PAGE_ACCESS_TOKEN");
+  const chunks = splitTextIntoChunks(text, 1900);
+  for (const chunk of chunks) {
+    await graphPost("me/messages", token, {
+      recipient: { id: psid },
+      messaging_type: "RESPONSE",
+      message: { text: chunk },
+    });
+  }
 }
 
-export function sendWhatsApp(to: string, text: string) {
-  return graphPost(`${need("WA_PHONE_NUMBER_ID")}/messages`, need("WA_TOKEN"), {
-    messaging_product: "whatsapp",
-    to,
-    type: "text",
-    text: { body: text.slice(0, 3900) },
-  });
+export async function sendWhatsApp(to: string, text: string) {
+  const phoneNumberId = need("WA_PHONE_NUMBER_ID");
+  const token = need("WA_TOKEN");
+  const chunks = splitTextIntoChunks(text, 3900);
+  for (const chunk of chunks) {
+    await graphPost(`${phoneNumberId}/messages`, token, {
+      messaging_product: "whatsapp",
+      to,
+      type: "text",
+      text: { body: chunk },
+    });
+  }
 }
 
 export function postToPage(message: string, link?: string) {
